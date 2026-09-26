@@ -93,6 +93,7 @@ class KernelSelectionTest(unittest.TestCase):
                     events = []
                     installer = mock.MagicMock()
                     installer.minimal_installation.side_effect = lambda **kwargs: events.append("base")
+                    installer.create_users.side_effect = lambda users: events.append("user")
 
                     def install_packages(packages):
                         events.append(packages)
@@ -102,7 +103,7 @@ class KernelSelectionTest(unittest.TestCase):
                     installer.add_additional_packages.side_effect = install_packages
                     config = types.SimpleNamespace(
                         kernels=kernels, locale_config=None, mirror_config=None,
-                        swap=None, auth_config=None, app_config=None, timezone=None,
+                        swap=None, auth_config=types.SimpleNamespace(users=["alice"]), app_config=None, timezone=None,
                         ntp=False, hostname="test", pacman_config="/etc/pacman.conf",
                     )
                     ctx = types.SimpleNamespace(
@@ -116,6 +117,7 @@ class KernelSelectionTest(unittest.TestCase):
                     unmount = stack.enter_context(mock.patch.object(phases_impl, "_unmount_offline_package_cache"))
                     stack.enter_context(mock.patch.object(phases_impl, "configure_keyboard", return_value=True))
                     stack.enter_context(mock.patch.object(phases_impl, "_install_early_packages", side_effect=lambda inst: events.append("early")))
+                    stack.enter_context(mock.patch.object(phases_impl, "_stage_region_defaults", side_effect=lambda target: events.append("region")))
                     stack.enter_context(mock.patch.object(phases_impl, "_runtime_package_list", return_value=["omarchy"]))
                     stack.enter_context(mock.patch.object(phases_impl.arch, "is_pre_mount", return_value=True, create=True))
                     stack.enter_context(mock.patch.object(phases_impl.arch, "root_user", return_value=None, create=True))
@@ -128,7 +130,7 @@ class KernelSelectionTest(unittest.TestCase):
                         phases_impl.arch_install_system(ctx)
                     expected = ["base", [f"{kernel}-headers" for kernel in kernels]]
                     if not fail_headers:
-                        expected += ["early", ["omarchy"]]
+                        expected += ["early", "region", "user", ["omarchy"]]
                     self.assertEqual(events, expected)
                     unmask.assert_called_once_with(ctx)
                     unmount.assert_called_once_with(ctx)
