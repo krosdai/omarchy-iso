@@ -28,6 +28,20 @@ Despite the local folder name, the first argument is the Omarchy source checkout
 
 Use `--dev` or `--rc` to build against those package channels. Both `--dev` and `--edge` select the dev packages from the edge mirror.
 
+### Regional builds
+
+`--region cn` adds China bootstrap defaults independently of the channel. The default, `--region global`, preserves the existing package set, mirrors, cache paths, and artifact names. Supported country profiles use lowercase ISO 3166-1 alpha-2 codes; currently only `cn` is implemented.
+
+For an unpublished regional runtime, use matching local source and package-recipe checkouts:
+
+```bash
+./bin/omarchy-iso-make --region cn --no-boot-offer --local-source /path/to/omarchy /path/to/omarchy-pkgs
+```
+
+China builds keep the channel mirror first, append the USTC Arch mirror, and add ArchLinuxCN with its verified keyring. USTC is rolling, not a matching stable/RC snapshot; fallback version compatibility is not guaranteed. The runtime profile also bundles offline Simplified Chinese Pinyin using the existing Fcitx5 service, with `Alt+Space` to switch input. New-user defaults are staged before user creation, including deferred setup, without changing existing homes, language, timezone, or keyboard settings. Users can change these defaults after installation; see `docs/regions.md` in the companion runtime checkout.
+
+Non-global cache and ISO names gain a `-cn` suffix. A runtime without the selected profile fails the build. These builds require an x86_64 Arch container environment; packaging and input checks on another architecture do not substitute for a fresh build, offline installation, and graphical acceptance run.
+
 ## Autoinstall
 
 The shipped ISO installs itself with no keyboard when it finds its configuration on a second drive. Attach a drive labeled `cidata` alongside the ISO and the installer copies the config off it and skips the configurator; with no such drive, nothing changes and the wizard runs as usual. No rebuild, no extra boot entry.
