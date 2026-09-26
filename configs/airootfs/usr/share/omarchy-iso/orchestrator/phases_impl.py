@@ -39,6 +39,36 @@ from .keyboard import configure_keyboard
 from .ui import error, info
 
 
+ISO_REGION_FILE = Path("/root/omarchy_region")
+ISO_REGION_PAYLOAD = Path("/usr/share/omarchy-iso/region")
+
+
+def _iso_region() -> str:
+    region = ISO_REGION_FILE.read_text().strip() if ISO_REGION_FILE.exists() else "global"
+    if region not in {"global", "cn"}:
+        raise RuntimeError(f"Unsupported ISO region: {region}")
+    return region
+
+
+def _stage_region_defaults(target: Path) -> None:
+    """Seed the target before useradd, including deferred first-boot users.
+
+    Region is a bootstrap default, not a locale or a user-level policy.
+    Existing home directories are never rewritten by this step.
+    """
+    region = _iso_region()
+    if region != "global":
+        if not ISO_REGION_PAYLOAD.is_dir():
+            raise RuntimeError(f"Missing ISO payload for region: {region}")
+        skel = ISO_REGION_PAYLOAD / "skel"
+        if skel.is_dir():
+            shutil.copytree(skel, target / "etc/skel", dirs_exist_ok=True)
+    marker = target / "etc/omarchy/region"
+    marker.parent.mkdir(parents=True, exist_ok=True)
+    marker.write_text(region + "\n")
+    marker.chmod(0o644)
+
+
 # Package targets are written by builder/build-iso.sh. Stable ISOs use the
 # stable package names, while dev/local-source ISOs install the dev package
 # names explicitly instead of relying on provides=omarchy resolution.
@@ -287,6 +317,7 @@ def arch_install_system(ctx: InstallContext) -> None:
             _install_early_packages(installer)
             _configure_limine_boot(ctx, installer, config)
 
+            _stage_region_defaults(ctx.target)
             info("› creating user (with /etc/skel populated)")
             if config.auth_config and config.auth_config.users:
                 installer.create_users(config.auth_config.users)
@@ -1135,6 +1166,13 @@ def _run_target_setup_command(ctx: InstallContext, cmd: list[str], *, user: str 
 
 
 def run_system_finalizer(ctx: InstallContext) -> None:
+    # The runtime package transaction has installed the regional keyring from
+    # the ISO. Initialize the target's trust database before enabling the online
+    # community repository; the build container's GPG state is not inherited.
+    if _iso_region() == "cn":
+        _run_target_setup_command(ctx, ["pacman-key", "--init"])
+        _run_target_setup_command(ctx, ["pacman-key", "--populate", "archlinux", "archlinuxcn"])
+
     if ctx.defer_provisioning:
         cmd = ["/usr/bin/omarchy-apply-system", "--defer-provisioning", "--first-install"]
     else:
