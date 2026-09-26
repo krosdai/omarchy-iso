@@ -130,6 +130,10 @@ BUILD_SCRIPT="builder/build-iso.sh"
 BUILD_ROOT=$(realpath "${BASH_SOURCE[0]%/*}/..")
 BUILD_RELEASE_PATH="$BUILD_ROOT/release"
 mkdir -p "$BUILD_RELEASE_PATH"
+# Each build writes into its own directory, so concurrent builds (such as a
+# global and a regional one) never pick up and rename each other's ISO.
+BUILD_OUT=$(mktemp -d "$BUILD_RELEASE_PATH/.build-XXXXXX")
+trap 'rm -rf "$BUILD_OUT"' EXIT
 
 OMARCHY_ISO_REF="${OMARCHY_ISO_REF:-quattro}"
 OMARCHY_MIRROR="${OMARCHY_MIRROR:-stable}"
@@ -143,7 +147,7 @@ DOCKER_ARGS=(
   -e "OMARCHY_INSTALL_DEBUG=${OMARCHY_INSTALL_DEBUG:-}"
   -e "HOST_UID=$(id -u)"
   -e "HOST_GID=$(id -g)"
-  -v "$BUILD_RELEASE_PATH/:/out/"
+  -v "$BUILD_OUT/:/out/"
   -v "$BUILD_ROOT/$BUILD_SCRIPT:/$BUILD_SCRIPT:ro"
   -v "$BUILD_ROOT/archiso:/archiso:ro"
   -v "$BUILD_ROOT/builder:/builder:ro"
@@ -187,9 +191,14 @@ fi
 
 "${DOCKER[@]}" run "${DOCKER_ARGS[@]}" archlinux/archlinux:latest /$BUILD_SCRIPT
 
-latest_iso=$(\ls -t "$BUILD_RELEASE_PATH"/*.iso | head -n1)
-iso_ref="${latest_iso%.*}-${OMARCHY_ISO_REF}${region_suffix}.iso"
-mv -f "$latest_iso" "$iso_ref"
+built_isos=("$BUILD_OUT"/*.iso)
+if (( ${#built_isos[@]} != 1 )) || [[ ! -f ${built_isos[0]} ]]; then
+  echo "Error: expected exactly one ISO in $BUILD_OUT" >&2
+  exit 1
+fi
+built_iso_name=$(basename "${built_isos[0]}" .iso)
+iso_ref="$BUILD_RELEASE_PATH/$built_iso_name-${OMARCHY_ISO_REF}${region_suffix}.iso"
+mv -f "${built_isos[0]}" "$iso_ref"
 
 if [[ -z "${NO_BOOT_OFFER:-}" ]]; then
   echo

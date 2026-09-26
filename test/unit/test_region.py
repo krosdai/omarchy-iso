@@ -179,7 +179,9 @@ class RegionMakeTest(unittest.TestCase):
             "docker": '''#!/bin/bash
 if [[ $1 == version ]]; then exit 0; fi
 printf '%s\\n' "$@" > "$TEST_LOG"
-touch "$TEST_ROOT/release/omarchy-test-x86_64.iso"
+for arg in "$@"; do
+  if [[ $arg == *:/out/ ]]; then touch "${arg%:/out/}/omarchy-test-x86_64.iso"; fi
+done
 ''',
         }
         for name, content in stubs.items():
@@ -216,6 +218,17 @@ touch "$TEST_ROOT/release/omarchy-test-x86_64.iso"
         self.assertIn("OMARCHY_REGION=global", self.log.read_text().splitlines())
         self.assertIn("/iso_stable/", self.log.read_text())
         self.assertTrue((self.root / "release/omarchy-test-x86_64-quattro.iso").exists())
+
+    def test_build_renames_only_its_own_iso(self):
+        release = self.root / "release"
+        release.mkdir()
+        other = release / "omarchy-other-x86_64.iso"
+        other.touch()
+        result = self.make("--region", "cn")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertTrue(other.exists())
+        self.assertTrue((release / "omarchy-test-x86_64-quattro-cn.iso").exists())
+        self.assertEqual(list(release.glob(".build-*")), [])
 
     def test_local_source_keeps_region_and_mounts_both_checkouts(self):
         for name in ("runtime", "packages"):
