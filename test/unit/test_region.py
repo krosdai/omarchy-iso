@@ -93,6 +93,7 @@ class RegionBuildTest(unittest.TestCase):
         self.profile = self.runtime / "default/regions/cn"
         (self.profile / "pacman").mkdir(parents=True)
         (self.runtime / "bin").mkdir()
+        (self.profile / "skel").mkdir()
         (self.runtime / "bin/omarchy-apply-pacman").touch()
         (self.profile / "packages").write_text("archlinuxcn-keyring\nfcitx5-rime\n")
         (self.profile / "pacman/pacman.conf.append").write_text("[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/$arch\n")
@@ -147,6 +148,13 @@ class RegionBuildTest(unittest.TestCase):
         self.assertIn("--local-source", result.stderr)
         self.assertFalse(self.log.exists())
         self.assertEqual(self.config.read_bytes(), self.original_config)
+
+    def test_profile_without_user_defaults_fails_before_package_operations(self):
+        (self.profile / "skel").rmdir()
+        result = self.prepare("cn")
+        self.assertNotEqual(result.returncode, 0)
+        self.assertFalse(self.log.exists())
+        self.assertEqual(self.packages.read_text(), "base\n")
 
     def test_untrusted_keyring_aborts_without_importing_keys(self):
         result = self.prepare("cn", TEST_PACMAN_STATUS="1")
