@@ -4,6 +4,11 @@ set -e
 
 OMARCHY_ISO_REF="${OMARCHY_ISO_REF:-quattro}"
 OMARCHY_MIRROR="${OMARCHY_MIRROR:-stable}"
+OMARCHY_REGION="${OMARCHY_REGION:-global}"
+case "$OMARCHY_REGION" in
+  global|cn) ;;
+  *) echo "Unsupported region: $OMARCHY_REGION" >&2; exit 1 ;;
+esac
 
 # Edge, dev, and local-source ISOs install the dev packages explicitly. Those
 # package recipes track the quattro branch. This avoids relying on pacman's
@@ -67,6 +72,7 @@ cp -r /configs/* "$build_cache_dir/"
 mkdir -p "$build_cache_dir/airootfs/usr/share/omarchy-iso"
 echo "$OMARCHY_MIRROR" > "$build_cache_dir/airootfs/root/omarchy_mirror"
 echo "$OMARCHY_ISO_REF" > "$build_cache_dir/airootfs/root/omarchy_iso_ref"
+echo "$OMARCHY_REGION" > "$build_cache_dir/airootfs/root/omarchy_region"
 cat > "$build_cache_dir/airootfs/usr/share/omarchy-iso/package-targets" <<EOF
 OMARCHY_RUNTIME_PACKAGE=$OMARCHY_RUNTIME_PACKAGE
 OMARCHY_SETTINGS_PACKAGE=$OMARCHY_SETTINGS_PACKAGE
@@ -80,6 +86,7 @@ if [[ ${OMARCHY_INSTALL_DEBUG:-} == "1" ]]; then
     echo "built_at=$(date -Is)"
     echo "ref=$OMARCHY_ISO_REF"
     echo "mirror=$OMARCHY_MIRROR"
+    echo "region=$OMARCHY_REGION"
     echo "runtime_package=$OMARCHY_RUNTIME_PACKAGE"
     echo "settings_package=$OMARCHY_SETTINGS_PACKAGE"
     echo "nvim_package=$OMARCHY_NVIM_PACKAGE"
@@ -139,6 +146,7 @@ sed -i -E '/^(linux|broadcom-wl)$/d' "$build_cache_dir/packages.x86_64"
 # already in the mirror and we filter them out below. Without it, pacman -Syw
 # pulls the published omarchy* from the network mirror like any other package.
 if [[ -d /omarchy-source ]]; then
+  runtime_root=/omarchy-source
   base_pkg_lists=(/omarchy-source/install/omarchy-base.packages /omarchy-source/install/omarchy-other.packages)
   setup_form=/omarchy-source/install/provisioning/setup-form.sh
 else
@@ -155,6 +163,14 @@ else
   fi
   mkdir -p /tmp/omarchy-pkglists
   bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/install/omarchy-base.packages usr/share/omarchy/install/omarchy-other.packages
+  runtime_root=/tmp/omarchy-pkglists/usr/share/omarchy
+  if [[ $OMARCHY_REGION != "global" ]]; then
+    if ! bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists \
+      "usr/share/omarchy/default/regions/$OMARCHY_REGION" usr/share/omarchy/bin/omarchy-apply-pacman; then
+      echo "ERROR: runtime lacks region support; publish a matching runtime or use --local-source." >&2
+      exit 1
+    fi
+  fi
   base_pkg_lists=(/tmp/omarchy-pkglists/usr/share/omarchy/install/omarchy-base.packages /tmp/omarchy-pkglists/usr/share/omarchy/install/omarchy-other.packages)
   # Extracted on its own, tolerating a miss: bsdtar exits non-zero for a member
   # it can't find, so asking for this alongside the package lists would abort the
@@ -167,6 +183,15 @@ fi
 mkdir -p "$build_cache_dir/airootfs/usr/share/omarchy-iso"
 cp "${base_pkg_lists[0]}" "$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-base.packages"
 cp "${base_pkg_lists[1]}" "$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-other.packages"
+
+# Work on writable copies, leaving the mounted runtime and ISO configs intact.
+online_config=/tmp/omarchy-pacman-online.conf
+cp "/configs/pacman-online-${OMARCHY_MIRROR}.conf" "$online_config"
+bash /builder/prepare-region.sh "$OMARCHY_REGION" "$runtime_root" "$build_cache_dir/airootfs" "$online_config"
+base_pkg_lists=(
+  "$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-base.packages"
+  "$build_cache_dir/airootfs/usr/share/omarchy-iso/omarchy-other.packages"
+)
 
 # The configurator's setup form comes from the runtime this ISO bundles, so the
 # installer and the first-boot setup that finishes a deferred install can never
@@ -225,7 +250,7 @@ fi
 
 mkdir -p /tmp/offlinedb
 download_offline_packages() {
-  pacman --config /configs/pacman-online-${OMARCHY_MIRROR}.conf --noconfirm -Syw \
+  pacman --config "$online_config" --noconfirm -Syw \
     "${all_packages[@]}" --cachedir "$offline_mirror_dir/" --dbpath /tmp/offlinedb --needed
 }
 
@@ -243,7 +268,7 @@ fi
 # newest version of every cached package name) removes packages that have left
 # the lists or dependency closure, such as an old Electron major version.
 if ! resolved_package_files="$(
-  pacman --config "/configs/pacman-online-${OMARCHY_MIRROR}.conf" --noconfirm \
+  pacman --config "$online_config" --noconfirm \
     --dbpath /tmp/offlinedb -S --print --print-format '%f' "${all_packages[@]}"
 )"; then
   echo "ERROR: could not resolve the package files required by the offline mirror" >&2
