@@ -36,10 +36,10 @@ class RegionTargetTest(unittest.TestCase):
 
     def test_cn_seeds_skel_without_touching_existing_users_or_locale(self):
         self.marker.write_text("cn\n")
-        profile = self.payload / "skel/.config/fcitx5/profile"
+        profile = self.payload / "skel/.config/example/defaults"
         profile.parent.mkdir(parents=True)
-        profile.write_text("regional input defaults\n")
-        existing = self.target / "home/alice/.config/fcitx5/profile"
+        profile.write_text("regional defaults\n")
+        existing = self.target / "home/alice/.config/example/defaults"
         existing.parent.mkdir(parents=True)
         existing.write_text("personal settings\n")
         skel = self.target / "etc/skel"
@@ -48,7 +48,7 @@ class RegionTargetTest(unittest.TestCase):
         (self.target / "etc/locale.conf").write_text("LANG=en_US.UTF-8\n")
 
         phases_impl._stage_region_defaults(self.target)
-        self.assertEqual((skel / ".config/fcitx5/profile").read_text(), "regional input defaults\n")
+        self.assertEqual((skel / ".config/example/defaults").read_text(), "regional defaults\n")
         self.assertEqual((skel / ".bashrc").read_text(), "original\n")
         self.assertEqual(existing.read_text(), "personal settings\n")
         self.assertEqual((self.target / "etc/locale.conf").read_text(), "LANG=en_US.UTF-8\n")
@@ -93,9 +93,8 @@ class RegionBuildTest(unittest.TestCase):
         self.profile = self.runtime / "default/regions/cn"
         (self.profile / "pacman").mkdir(parents=True)
         (self.runtime / "bin").mkdir()
-        (self.profile / "skel").mkdir()
         (self.runtime / "bin/omarchy-apply-pacman").touch()
-        (self.profile / "packages").write_text("archlinuxcn-keyring\nfcitx5-rime\n")
+        (self.profile / "packages").write_text("archlinuxcn-keyring\nexample-regional-package\n")
         (self.profile / "pacman/pacman.conf.append").write_text("[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/$arch\n")
         (self.profile / "pacman/mirrorlist.append").write_text("Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch\n")
         self.iso = self.root / "iso"
@@ -124,13 +123,13 @@ class RegionBuildTest(unittest.TestCase):
     def test_cn_adds_real_install_targets_and_verifies_keyring_first(self):
         result = self.prepare("cn")
         self.assertEqual(result.returncode, 0, result.stderr)
-        self.assertEqual(self.packages.read_text(), "base\n\narchlinuxcn-keyring\nfcitx5-rime\n")
+        self.assertEqual(self.packages.read_text(), "base\n\narchlinuxcn-keyring\nexample-regional-package\n")
         self.assertEqual(self.config.read_bytes(), self.original_config + b"\n[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/$arch\n")
-        self.assertEqual((self.payload / "region/packages").read_text(), "archlinuxcn-keyring\nfcitx5-rime\n")
+        self.assertEqual((self.payload / "region/packages").read_text(), "archlinuxcn-keyring\nexample-regional-package\n")
         self.assertEqual(self.log.read_text().splitlines(), [f"pacman --config {self.config} --noconfirm -Sy --needed archlinuxcn-keyring", "pacman-key --populate archlinuxcn"])
         with mock.patch.object(phases_impl, "Path", return_value=self.packages), \
              mock.patch.object(phases_impl, "_package_targets", return_value={"runtime": "omarchy-dev", "settings": "omarchy-settings-dev", "nvim": "omarchy-nvim"}):
-            self.assertEqual(phases_impl._runtime_package_list(None), ["omarchy-dev", "base", "archlinuxcn-keyring", "fcitx5-rime"])
+            self.assertEqual(phases_impl._runtime_package_list(None), ["omarchy-dev", "base", "archlinuxcn-keyring", "example-regional-package"])
 
     def test_global_is_unchanged_without_region_support_in_runtime(self):
         shutil.rmtree(self.runtime)
@@ -149,12 +148,10 @@ class RegionBuildTest(unittest.TestCase):
         self.assertFalse(self.log.exists())
         self.assertEqual(self.config.read_bytes(), self.original_config)
 
-    def test_profile_without_user_defaults_fails_before_package_operations(self):
-        (self.profile / "skel").rmdir()
+    def test_profile_without_user_defaults_is_supported(self):
         result = self.prepare("cn")
-        self.assertNotEqual(result.returncode, 0)
-        self.assertFalse(self.log.exists())
-        self.assertEqual(self.packages.read_text(), "base\n")
+        self.assertEqual(result.returncode, 0, result.stderr)
+        self.assertFalse((self.payload / "region/skel").exists())
 
     def test_untrusted_keyring_aborts_without_importing_keys(self):
         result = self.prepare("cn", TEST_PACMAN_STATUS="1")
