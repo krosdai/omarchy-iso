@@ -38,9 +38,9 @@ For an unpublished regional runtime, use matching local source and package-recip
 ./bin/omarchy-iso-make --region cn --no-boot-offer --local-source /path/to/omarchy /path/to/omarchy-pkgs
 ```
 
-China builds keep the channel mirror first, append the USTC Arch mirror, and add ArchLinuxCN with its verified keyring. USTC is rolling, not a matching stable/RC snapshot; fallback version compatibility is not guaranteed. The runtime profile also bundles offline Simplified Chinese Pinyin using the existing Fcitx5 service, with `Alt+Space` to switch input. New-user defaults are staged before user creation, including deferred setup, without changing existing homes, language, timezone, or keyboard settings. Users can change these defaults after installation; see `docs/regions.md` in the companion runtime checkout.
+China builds keep the channel mirror first, append the USTC Arch mirror, and add ArchLinuxCN with its verified keyring. These are a practical bridge until Omarchy runs its own mirror in China; USTC is rolling, not a matching stable/RC snapshot, so fallback version compatibility is not guaranteed. The region architecture also stages optional new-user defaults before user creation, including deferred setup, without touching existing homes. The China profile currently ships repository defaults only; language, timezone, and input-method defaults come as separate changes. See `docs/regions.md` in the companion runtime checkout.
 
-Non-global cache and ISO names gain a `-cn` suffix. A runtime without the selected profile fails the build. These builds require an x86_64 Arch container environment; packaging and input checks on another architecture do not substitute for a fresh build, offline installation, and graphical acceptance run.
+Non-global cache and ISO names gain a `-cn` suffix. A runtime without the selected profile fails the build. These builds require an x86_64 Arch container environment; packaging checks on another architecture do not substitute for a fresh build, offline installation, and graphical acceptance run.
 
 ## Autoinstall
 
