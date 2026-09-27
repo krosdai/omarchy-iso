@@ -17,8 +17,7 @@ esac
 
 profile="$runtime/default/regions/$region"
 if [[ ! -f $runtime/bin/omarchy-apply-pacman || ! -f $profile/packages ||
-      ! -f $profile/pacman/pacman.conf.append || ! -f $profile/pacman/mirrorlist.append ||
-      ! -d $profile/skel ]]; then
+      ! -f $profile/pacman/pacman.conf.append || ! -f $profile/pacman/mirrorlist.append ]]; then
   echo "Runtime does not support region '$region'; publish a matching runtime or use --local-source." >&2
   exit 1
 fi
