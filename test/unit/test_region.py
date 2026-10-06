@@ -1,6 +1,7 @@
 """Region bootstrap contracts without Docker, pacman, or a running guest."""
 
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -97,6 +98,7 @@ class RegionBuildTest(unittest.TestCase):
         (self.profile / "packages").write_text("archlinuxcn-keyring\nexample-regional-package\n")
         (self.profile / "pacman/pacman.conf.append").write_text("[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/$arch\n")
         (self.profile / "pacman/mirrorlist.append").write_text("Server = https://mirrors.ustc.edu.cn/archlinux/$repo/os/$arch\n")
+        (self.profile / "timezone").write_text("Asia/Shanghai\n")
         self.iso = self.root / "iso"
         self.payload = self.iso / "usr/share/omarchy-iso"
         self.payload.mkdir(parents=True)
@@ -126,6 +128,7 @@ class RegionBuildTest(unittest.TestCase):
         self.assertEqual(self.packages.read_text(), "base\n\narchlinuxcn-keyring\nexample-regional-package\n")
         self.assertEqual(self.config.read_bytes(), self.original_config + b"\n[archlinuxcn]\nServer = https://mirrors.ustc.edu.cn/archlinuxcn/$arch\n")
         self.assertEqual((self.payload / "region/packages").read_text(), "archlinuxcn-keyring\nexample-regional-package\n")
+        self.assertEqual((self.payload / "region/timezone").read_text(), "Asia/Shanghai\n")
         self.assertEqual(self.log.read_text().splitlines(), [f"pacman --config {self.config} --noconfirm -Sy --needed archlinuxcn-keyring", "pacman-key --populate archlinuxcn"])
         with mock.patch.object(phases_impl, "Path", return_value=self.packages), \
              mock.patch.object(phases_impl, "_package_targets", return_value={"runtime": "omarchy-dev", "settings": "omarchy-settings-dev", "nvim": "omarchy-nvim"}):
@@ -250,3 +253,34 @@ done
 
 if __name__ == "__main__":
     unittest.main()
+
+
+class ConfiguratorRegionTimezoneTest(unittest.TestCase):
+    """The configurator hands the ISO's regional timezone to the setup form."""
+
+    def setUp(self):
+        configurator = (ROOT / "configs/airootfs/root/configurator").read_text()
+        helper = re.search(r"^region_timezone\(\) \{\n.*?^\}", configurator, re.M | re.S)
+        self.assertIsNotNone(helper)
+        self.helper = helper.group(0)
+        self.configurator = configurator
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        self.file = Path(tmp.name) / "timezone"
+
+    def region_timezone(self):
+        return subprocess.run(
+            ["bash", "-c", f"set -euo pipefail\n{self.helper}\nregion_timezone"],
+            env={**os.environ, "REGION_TIMEZONE": str(self.file)},
+            capture_output=True, text=True, check=True,
+        ).stdout
+
+    def test_global_iso_offers_no_timezone(self):
+        self.assertEqual(self.region_timezone(), "")
+
+    def test_regional_iso_offers_its_profile_timezone(self):
+        self.file.write_text("Asia/Shanghai\n")
+        self.assertEqual(self.region_timezone(), "Asia/Shanghai\n")
+
+    def test_user_form_passes_it_to_the_timezone_prompt(self):
+        self.assertIn('omarchy_prompt_timezone "$(region_timezone)"', self.configurator)
