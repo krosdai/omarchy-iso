@@ -251,9 +251,6 @@ done
                 self.assertFalse((self.root / "release").exists())
 
 
-if __name__ == "__main__":
-    unittest.main()
-
 
 class ConfiguratorRegionTimezoneTest(unittest.TestCase):
     """The configurator hands the ISO's regional timezone to the setup form."""
@@ -284,3 +281,7 @@ class ConfiguratorRegionTimezoneTest(unittest.TestCase):
 
     def test_user_form_passes_it_to_the_timezone_prompt(self):
         self.assertIn('omarchy_prompt_timezone "$(region_timezone)"', self.configurator)
+
+
+if __name__ == "__main__":
+    unittest.main()
