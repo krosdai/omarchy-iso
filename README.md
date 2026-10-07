@@ -38,7 +38,7 @@ For an unpublished regional runtime, use matching local source and package-recip
 ./bin/omarchy-iso-make --region cn --no-boot-offer --local-source /path/to/omarchy /path/to/omarchy-pkgs
 ```
 
-China builds keep the channel mirror first, append the USTC Arch mirror, and add ArchLinuxCN with its verified keyring. These are a practical bridge until Omarchy runs its own mirror in China; USTC is rolling, not a matching stable/RC snapshot, so fallback version compatibility is not guaranteed. The region architecture also stages optional new-user defaults before user creation, including deferred setup, without touching existing homes. The China profile currently ships repository defaults only; language, timezone, and input-method defaults come as separate changes. See `docs/regions.md` in the companion runtime checkout.
+China builds keep the channel mirror first, append the USTC Arch mirror, and add ArchLinuxCN with its verified keyring. These are a practical bridge until Omarchy runs its own mirror in China; USTC is rolling, not a matching stable/RC snapshot, so fallback version compatibility is not guaranteed. The region architecture also stages optional new-user defaults before user creation, including deferred setup, without touching existing homes. The China profile ships repository defaults and preselects `Asia/Shanghai` as the timezone; language and input-method defaults come as separate changes. See `docs/regions.md` in the companion runtime checkout.
 
 Non-global cache and ISO names gain a `-cn` suffix. A runtime without the selected profile fails the build. These builds require an x86_64 Arch container environment; packaging checks on another architecture do not substitute for a fresh build, offline installation, and graphical acceptance run.
 

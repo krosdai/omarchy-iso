@@ -24,6 +24,16 @@ if [[ ! -r $SETUP_FORM ]]; then
 fi
 source "$SETUP_FORM"
 
+# A regional ISO carries its profile here (builder/prepare-region.sh copies it);
+# the form preselects the profile's timezone when there is no geo guess, which
+# is every offline install.
+REGION_TIMEZONE="${REGION_TIMEZONE:-/usr/share/omarchy-iso/region/timezone}"
+region_timezone() {
+  if [[ -r $REGION_TIMEZONE ]]; then
+    head -n 1 "$REGION_TIMEZONE"
+  fi
+}
+
 # Partition creation helpers, shared with test/partition-numbering-test.sh so
 # the numbering logic can be exercised without a real disk.
 DISK_PARTITIONING="${DISK_PARTITIONING:-/usr/share/omarchy-iso/disk-partitioning.sh}"
@@ -270,7 +280,7 @@ user_form() {
 
   omarchy_prompt_identity || return $?
   omarchy_prompt_hostname || return $?
-  omarchy_prompt_timezone || return $?
+  omarchy_prompt_timezone "$(region_timezone)" || return $?
 }
 
 # Returns 0 on confirmed account details, or as soon as the keyboard screen
