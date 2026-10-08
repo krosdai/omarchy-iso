@@ -209,6 +209,17 @@ cp "/configs/pacman-online-${OMARCHY_MIRROR}.conf" "$online_config"
 bash /builder/prepare-regions.sh "$regions_source" \
   "$build_cache_dir/airootfs/usr/share/omarchy-iso" "$online_config"
 
+# Profiles ship in the settings package, but the finalizer that applies them
+# ships in the runtime. A runtime without it would ignore the region marker,
+# leaving regional targets with the keyring but none of the repositories.
+if [[ -n ${omarchy_pkg:-} && -d $build_cache_dir/airootfs/usr/share/omarchy-iso/regions ]]; then
+  runtime_listing=$(bsdtar -tf "$omarchy_pkg")
+  if ! grep -qx 'usr/bin/omarchy-apply-pacman' <<<"$runtime_listing"; then
+    echo "ERROR: $OMARCHY_SETTINGS_PACKAGE ships region profiles, but $OMARCHY_RUNTIME_PACKAGE lacks omarchy-apply-pacman to apply them." >&2
+    exit 1
+  fi
+fi
+
 # Collect every package we want available in the offline mirror.
 declare -a all_packages
 mapfile -t all_packages < <(
