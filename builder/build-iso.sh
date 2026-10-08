@@ -142,7 +142,7 @@ sed -i -E '/^(linux|broadcom-wl)$/d' "$build_cache_dir/packages.x86_64"
 # already in the mirror and we filter them out below. Without it, pacman -Syw
 # pulls the published omarchy* from the network mirror like any other package.
 if [[ -d /omarchy-source ]]; then
-  runtime_root=/omarchy-source
+  regions_source=/omarchy-source/default/regions
   base_pkg_lists=(/omarchy-source/install/omarchy-base.packages /omarchy-source/install/omarchy-other.packages)
   setup_form=/omarchy-source/install/provisioning/setup-form.sh
 else
@@ -165,9 +165,17 @@ else
   # build here (set -e) with a bare "Not found in archive" instead of the
   # actionable error below.
   bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/install/provisioning/setup-form.sh 2>/dev/null || true
-  # Likewise optional: a runtime predating region profiles ships none.
-  bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/default/regions 2>/dev/null || true
-  runtime_root=/tmp/omarchy-pkglists/usr/share/omarchy
+  # Region profiles live under default/, which the settings package ships,
+  # not the runtime. Its own cache dir keeps the runtime lookup above from
+  # ever matching it.
+  settings_cache_dir="$bootstrap_cache_dir/settings"
+  mkdir -p "$settings_cache_dir"
+  pacman --config /configs/pacman-online-${OMARCHY_MIRROR}.conf --noconfirm -Syw "$OMARCHY_SETTINGS_PACKAGE" --cachedir "$settings_cache_dir" --dbpath /tmp/offlinedb-bootstrap >/dev/null
+  regions_source=$(find "$settings_cache_dir" -maxdepth 1 -type f -name "$OMARCHY_SETTINGS_PACKAGE-*.pkg.tar.zst" | sort | head -1)
+  if [[ -z $regions_source ]]; then
+    echo "ERROR: downloaded package for $OMARCHY_SETTINGS_PACKAGE not found in $settings_cache_dir" >&2
+    exit 1
+  fi
   setup_form=/tmp/omarchy-pkglists/usr/share/omarchy/install/provisioning/setup-form.sh
 fi
 
@@ -198,7 +206,7 @@ cp "$setup_form" "$build_cache_dir/airootfs/usr/share/omarchy-iso/setup-form.sh"
 # repositories join a writable copy of the online config to download them.
 online_config=/tmp/omarchy-pacman-online.conf
 cp "/configs/pacman-online-${OMARCHY_MIRROR}.conf" "$online_config"
-bash /builder/prepare-regions.sh "$runtime_root/default/regions" \
+bash /builder/prepare-regions.sh "$regions_source" \
   "$build_cache_dir/airootfs/usr/share/omarchy-iso" "$online_config"
 
 # Collect every package we want available in the offline mirror.

@@ -7,6 +7,7 @@ import sys
 import tempfile
 import types
 import unittest
+from contextlib import ExitStack
 from pathlib import Path
 from unittest import mock
 
@@ -26,7 +27,8 @@ def write_profiles(root: Path) -> Path:
     (cn / "timezones").write_text("# China\nAsia/Shanghai\n\n  Asia/Urumqi  \n")
     (cn / "packages").write_text("# keyring first\narchlinuxcn-keyring\nextra-tool\n")
     (cn / "pacman/pacman.conf.append").write_text("[archlinuxcn]\nServer = https://example.invalid/$arch\n")
-    (cn / "pacman/mirrorlist.append").write_text("Server = https://example.invalid/$repo/os/$arch\n")
+    for channel in ("stable", "rc", "edge"):
+        (cn / f"pacman/mirrorlist-{channel}.prepend").write_text(f"Server = https://{channel}.example.invalid/$repo/os/$arch\n")
     return regions
 
 
@@ -62,7 +64,7 @@ class RegionSelectionTest(unittest.TestCase):
         self.assertEqual(region.resolve_region({"region": "cn"}, "UTC"), "cn")
         self.assertEqual(region.resolve_region({"region": "global"}, "Asia/Shanghai"), "global")
         self.assertEqual(region.resolve_region({}, "Asia/Shanghai"), "cn")
-        for bad in ("us", "CN", "..", "cn/../cn"):
+        for bad in ("us", "CN", "..", "cn/../cn", True, 1, ["cn"]):
             with self.subTest(region=bad), self.assertRaises(RuntimeError):
                 region.resolve_region({"region": bad}, "UTC")
 
@@ -103,6 +105,41 @@ class RegionSelectionTest(unittest.TestCase):
         marker = target / "etc/omarchy/region"
         self.assertEqual(marker.read_text(), "cn\n")
         self.assertEqual(marker.stat().st_mode & 0o777, 0o644)
+
+    def test_region_packages_install_while_the_offline_mirror_is_mounted(self):
+        for selected, expected_packages in [("global", []), ("cn", [["archlinuxcn-keyring", "extra-tool"]])]:
+            with self.subTest(region=selected), ExitStack() as stack:
+                events = []
+                installer = mock.MagicMock()
+                installer.add_additional_packages.side_effect = lambda packages: events.append(packages)
+                config = types.SimpleNamespace(
+                    kernels=["linux-omarchy"], locale_config=None, mirror_config=None,
+                    swap=None, auth_config=None, app_config=None, timezone=None,
+                    ntp=False, hostname="test", pacman_config="/etc/pacman.conf",
+                )
+                ctx = types.SimpleNamespace(
+                    state={"arch_config_handler": types.SimpleNamespace(config=config), "mirror_handler": None},
+                    target=self.root / "target", tailscale_authkey_path=None, omarchy_install={},
+                    region=selected,
+                )
+                for name in ("_mount_offline_package_cache", "_mask_mkinitcpio_pacman_hooks",
+                             "_unmask_mkinitcpio_pacman_hooks", "_configure_limine_boot",
+                             "_write_pre_mounted_fstab", "_install_early_packages"):
+                    stack.enter_context(mock.patch.object(phases_impl, name))
+                stack.enter_context(mock.patch.object(
+                    phases_impl, "_unmount_offline_package_cache", side_effect=lambda _: events.append("unmount")))
+                stack.enter_context(mock.patch.object(phases_impl, "configure_keyboard", return_value=True))
+                stack.enter_context(mock.patch.object(phases_impl, "_runtime_package_list", return_value=["omarchy"]))
+                for name, value in (("is_pre_mount", True), ("root_user", None)):
+                    stack.enter_context(mock.patch.object(phases_impl.arch, name, return_value=value, create=True))
+                stack.enter_context(mock.patch.object(phases_impl.arch, "sanity_check", create=True))
+                opened = stack.enter_context(mock.patch.object(phases_impl.arch, "open_installer", create=True))
+                opened.return_value.__enter__.return_value = installer
+
+                phases_impl.arch_install_system(ctx)
+
+                self.assertEqual(events, [["linux-omarchy-headers"], ["omarchy"], *expected_packages, "unmount"])
+                self.assertEqual((ctx.target / "etc/omarchy/region").exists(), selected != "global")
 
     def test_finalizer_trusts_only_the_selected_region(self):
         for selected, expected in [
@@ -152,6 +189,39 @@ class PrepareRegionsTest(unittest.TestCase):
                 f"pacman --config {online} --noconfirm -Sy --needed archlinuxcn-keyring",
                 "pacman-key --populate archlinuxcn",
             ])
+
+    def settings_package(self, root: Path, with_regions: bool) -> Path:
+        tree = root / "pkgroot"
+        (tree / "usr/share/omarchy/default/pacman").mkdir(parents=True)
+        if with_regions:
+            write_profiles(root / "src")
+            (root / "src/regions").rename(tree / "usr/share/omarchy/default/regions")
+        package = root / "omarchy-settings-1-1-any.pkg.tar.zst"
+        subprocess.run(["bsdtar", "--zstd", "-cf", str(package), "-C", str(tree), "usr"], check=True)
+        return package
+
+    def test_published_build_reads_profiles_from_the_settings_package(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, online, calls = self.run_prepare(self.settings_package(root, with_regions=True), root)
+            self.assertEqual((payload / "regions/cn/packages").read_text(), "# keyring first\narchlinuxcn-keyring\nextra-tool\n")
+            self.assertIn("[archlinuxcn]", online.read_text())
+            self.assertIn("pacman-key --populate archlinuxcn", calls)
+
+    def test_settings_package_without_profiles_builds_a_global_iso(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            payload, online, calls = self.run_prepare(self.settings_package(root, with_regions=False), root)
+            self.assertFalse((payload / "regions").exists())
+            self.assertEqual(calls, "")
+
+    def test_unreadable_settings_package_fails_the_build(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            package = root / "omarchy-settings-1-1-any.pkg.tar.zst"
+            package.write_text("not an archive")
+            with self.assertRaises(subprocess.CalledProcessError):
+                self.run_prepare(package, root)
 
     def test_runtime_without_profiles_builds_a_global_iso(self):
         with tempfile.TemporaryDirectory() as tmp:
