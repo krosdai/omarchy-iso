@@ -142,6 +142,7 @@ sed -i -E '/^(linux|broadcom-wl)$/d' "$build_cache_dir/packages.x86_64"
 # already in the mirror and we filter them out below. Without it, pacman -Syw
 # pulls the published omarchy* from the network mirror like any other package.
 if [[ -d /omarchy-source ]]; then
+  runtime_root=/omarchy-source
   base_pkg_lists=(/omarchy-source/install/omarchy-base.packages /omarchy-source/install/omarchy-other.packages)
   setup_form=/omarchy-source/install/provisioning/setup-form.sh
 else
@@ -164,6 +165,9 @@ else
   # build here (set -e) with a bare "Not found in archive" instead of the
   # actionable error below.
   bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/install/provisioning/setup-form.sh 2>/dev/null || true
+  # Likewise optional: a runtime predating region profiles ships none.
+  bsdtar -xf "$omarchy_pkg" -C /tmp/omarchy-pkglists usr/share/omarchy/default/regions 2>/dev/null || true
+  runtime_root=/tmp/omarchy-pkglists/usr/share/omarchy
   setup_form=/tmp/omarchy-pkglists/usr/share/omarchy/install/provisioning/setup-form.sh
 fi
 
@@ -190,6 +194,13 @@ if [[ ! -f $setup_form ]]; then
 fi
 cp "$setup_form" "$build_cache_dir/airootfs/usr/share/omarchy-iso/setup-form.sh"
 
+# Every region's packages ride in the offline mirror, and its community
+# repositories join a writable copy of the online config to download them.
+online_config=/tmp/omarchy-pacman-online.conf
+cp "/configs/pacman-online-${OMARCHY_MIRROR}.conf" "$online_config"
+bash /builder/prepare-regions.sh "$runtime_root/default/regions" \
+  "$build_cache_dir/airootfs/usr/share/omarchy-iso" "$online_config"
+
 # Collect every package we want available in the offline mirror.
 declare -a all_packages
 mapfile -t all_packages < <(
@@ -197,6 +208,9 @@ mapfile -t all_packages < <(
     cat "$build_cache_dir/packages.x86_64"
     grep -hv '^#\|^$' "${base_pkg_lists[@]}"
     grep -hv '^#\|^$' /builder/archinstall.packages
+    # Downloaded but not installed: the installer adds a region's packages
+    # only to targets in that region.
+    grep -hsv '^#\|^$' "$build_cache_dir"/airootfs/usr/share/omarchy-iso/regions/*/packages || true
     # Always include the selected Omarchy packages so the target install can
     # find the runtime and companion packages in the offline mirror.
     printf '%s\n' "$OMARCHY_RUNTIME_PACKAGE" "$OMARCHY_SETTINGS_PACKAGE" "$OMARCHY_NVIM_PACKAGE"
@@ -235,7 +249,7 @@ fi
 
 mkdir -p /tmp/offlinedb
 download_offline_packages() {
-  pacman --config /configs/pacman-online-${OMARCHY_MIRROR}.conf --noconfirm -Syw \
+  pacman --config "$online_config" --noconfirm -Syw \
     "${all_packages[@]}" --cachedir "$offline_mirror_dir/" --dbpath /tmp/offlinedb --needed
 }
 
@@ -253,7 +267,7 @@ fi
 # newest version of every cached package name) removes packages that have left
 # the lists or dependency closure, such as an old Electron major version.
 if ! resolved_package_files="$(
-  pacman --config "/configs/pacman-online-${OMARCHY_MIRROR}.conf" --noconfirm \
+  pacman --config "$online_config" --noconfirm \
     --dbpath /tmp/offlinedb -S --print --print-format '%f' "${all_packages[@]}"
 )"; then
   echo "ERROR: could not resolve the package files required by the offline mirror" >&2
