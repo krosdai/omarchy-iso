@@ -37,12 +37,14 @@ def region_for_timezone(timezone: str | None, regions_dir: Path | None = None) -
 def resolve_region(omarchy_install: dict, timezone: str | None, regions_dir: Path | None = None) -> str:
     regions_dir = regions_dir or REGIONS_DIR
     region = omarchy_install.get("region")
-    if not region:
+    if region is None or region == "":
         return region_for_timezone(timezone, regions_dir)
     # Profiles are named by ISO 3166-1 alpha-2 code; checking the shape first
     # keeps a path like ".." from passing the directory test.
-    if region != GLOBAL and not (re.fullmatch(r"[a-z]{2}", region) and (regions_dir / region).is_dir()):
-        raise RuntimeError(f"Unsupported region: {region}")
+    if not isinstance(region, str) or (
+        region != GLOBAL and not (re.fullmatch(r"[a-z]{2}", region) and (regions_dir / region).is_dir())
+    ):
+        raise RuntimeError(f"Unsupported region: {region!r}")
     return region
 
 
